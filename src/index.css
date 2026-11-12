@@ -2,6 +2,16 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Accent colors come from CSS variables, so the user can switch themes */
+@theme inline {
+  --color-accent-50: var(--a50);
+  --color-accent-100: var(--a100);
+  --color-accent-400: var(--a400);
+  --color-accent-500: var(--a500);
+  --color-accent-600: var(--a600);
+  --color-accent-700: var(--a700);
+}
+
 @theme {
   --animate-fade-up: fade-up 0.3s ease-out;
   --animate-pop: pop 0.22s ease-out;
@@ -14,6 +24,27 @@
     from { opacity: 0; transform: scale(0.96) translateY(12px); }
     to { opacity: 1; transform: none; }
   }
+}
+
+:root {
+  --a50: #eef2ff; --a100: #e0e7ff; --a400: #818cf8;
+  --a500: #6366f1; --a600: #4f46e5; --a700: #4338ca;
+}
+[data-accent="violet"] {
+  --a50: #f5f3ff; --a100: #ede9fe; --a400: #a78bfa;
+  --a500: #8b5cf6; --a600: #7c3aed; --a700: #6d28d9;
+}
+[data-accent="rose"] {
+  --a50: #fff1f2; --a100: #ffe4e6; --a400: #fb7185;
+  --a500: #f43f5e; --a600: #e11d48; --a700: #be123c;
+}
+[data-accent="emerald"] {
+  --a50: #ecfdf5; --a100: #d1fae5; --a400: #34d399;
+  --a500: #10b981; --a600: #059669; --a700: #047857;
+}
+[data-accent="sky"] {
+  --a50: #f0f9ff; --a100: #e0f2fe; --a400: #38bdf8;
+  --a500: #0ea5e9; --a600: #0284c7; --a700: #0369a1;
 }
 
 body {

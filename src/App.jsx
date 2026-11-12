@@ -1,146 +1,423 @@
+
 import { useCallback, useRef, useState } from 'react'
-import { ListTodo, StickyNote, Moon, Sun, Settings, Download, Upload, Smartphone } from 'lucide-react'
+import {
+  LayoutDashboard,
+  ListTodo,
+  StickyNote,
+  Timer,
+  CalendarDays,
+  Settings as Cog,
+  Moon,
+  Sun,
+  Sparkles,
+  Menu,
+  X,
+  CheckCircle2
+} from 'lucide-react'
+
+import Dashboard from './components/Dashboard'
 import Tasks from './components/Tasks'
 import Notes from './components/Notes'
+import Focus from './components/Focus'
+import Calendar from './components/Calendar'
+import Settings from './components/Settings'
+
 import useLocalStorage from './hooks/useLocalStorage'
 import useTheme from './hooks/useTheme'
 import useInstallPrompt from './hooks/useInstallPrompt'
+import useTaskActions from './hooks/useTaskActions'
 
-const greeting = () => {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
-}
+import { todayISO } from './constants'
+
+const TABS = [
+  { id: 'home', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'tasks', label: 'My Tasks', icon: ListTodo },
+  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { id: 'notes', label: 'My Notes', icon: StickyNote },
+  { id: 'focus', label: 'Focus Timer', icon: Timer }
+]
 
 export default function App() {
-  const [tab, setTab] = useState('tasks')
+  const [tab, setTab] = useState('home')
+
   const [tasks, setTasks] = useLocalStorage('tasks', [])
   const [notes, setNotes] = useLocalStorage('notes', [])
-  const [theme, toggleTheme] = useTheme()
+  const [activity, setActivity] = useLocalStorage('activity', {})
+  const [focus, setFocus] = useLocalStorage('focus', {})
+  const [name, setName] = useLocalStorage('name', '')
+  const [goal, setGoal] = useLocalStorage('goal', 5)
+
+  const { theme, toggle: toggleTheme, accent, setAccent } = useTheme()
   const { canInstall, install } = useInstallPrompt()
-  const [menu, setMenu] = useState(false)
+
+  const [showSettings, setShowSettings] = useState(false)
+  const [mobileMenu, setMobileMenu] = useState(false)
   const [toast, setToast] = useState(null)
-  const timer = useRef()
-  const fileRef = useRef()
+
+  const timer = useRef(null)
+  const fileRef = useRef(null)
 
   const notify = useCallback((msg, undo) => {
-    clearTimeout(timer.current)
+    if (timer.current) clearTimeout(timer.current)
+
     setToast({ msg, undo })
-    timer.current = setTimeout(() => setToast(null), 4500)
+
+    timer.current = setTimeout(() => {
+      setToast(null)
+    }, 4500)
   }, [])
 
+  const bump = useCallback((delta) => {
+    setActivity((previous) => {
+      const key = todayISO()
+
+      return {
+        ...previous,
+        [key]: Math.max(0, (previous[key] || 0) + delta)
+      }
+    })
+  }, [setActivity])
+
+  const { toggle } = useTaskActions(tasks, setTasks, bump)
+
   const exportData = () => {
-    const data = { tasks, notes, exportedAt: new Date().toISOString() }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const data = {
+      tasks,
+      notes,
+      activity,
+      focus,
+      name,
+      goal,
+      exportedAt: new Date().toISOString()
+    }
+
+    const blob = new Blob(
+      [JSON.stringify(data, null, 2)],
+      { type: 'application/json' }
+    )
+
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `todo-notes-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
+    const link = document.createElement('a')
+
+    link.href = url
+    link.download = `taskflow-backup-${todayISO()}.json`
+    link.click()
+
     URL.revokeObjectURL(url)
-    setMenu(false)
+    notify('Backup downloaded successfully')
   }
 
-  const importData = (e) => {
-    const file = e.target.files?.[0]
+  const importData = (event) => {
+    const file = event.target.files?.[0]
     if (!file) return
+
     const reader = new FileReader()
+
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result)
-        if (!Array.isArray(data.tasks) || !Array.isArray(data.notes)) throw new Error()
+
+        if (!Array.isArray(data.tasks) || !Array.isArray(data.notes)) {
+          throw new Error('Invalid backup')
+        }
+
         setTasks(data.tasks)
         setNotes(data.notes)
-        notify('Backup restored')
+
+        if (data.activity) setActivity(data.activity)
+        if (data.focus) setFocus(data.focus)
+        if (typeof data.name === 'string') setName(data.name)
+        if (typeof data.goal === 'number') setGoal(data.goal)
+
+        notify('Backup restored successfully')
       } catch {
         notify('Invalid backup file')
       }
     }
+
     reader.readAsText(file)
-    e.target.value = ''
-    setMenu(false)
+    event.target.value = ''
+    setShowSettings(false)
   }
 
-  const pending = tasks.filter((t) => !t.done).length
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+  const resetAll = () => {
+    if (!confirm('Delete ALL tasks, notes and statistics? This cannot be undone.')) {
+      return
+    }
 
-  const iconBtn =
-    'grid h-11 w-11 place-items-center rounded-full bg-white text-slate-600 shadow-xs ring-1 ring-slate-200 transition active:scale-95 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800'
+    setTasks([])
+    setNotes([])
+    setActivity({})
+    setFocus({})
+
+    setShowSettings(false)
+    notify('All data cleared')
+  }
+
+  const pending = tasks.filter((task) => !task.done).length
+  const completed = tasks.filter((task) => task.done).length
+
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  })
+
+  const openTab = (id) => {
+    setTab(id)
+    setMobileMenu(false)
+  }
+
+  const currentTab = TABS.find((item) => item.id === tab)
 
   return (
-    <div className="relative isolate min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      {/* decorative background */}
-      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-        <div className="absolute -right-32 -top-32 h-96 w-96 rounded-full bg-indigo-400/20 blur-3xl" />
-        <div className="absolute -left-32 top-1/2 h-96 w-96 rounded-full bg-fuchsia-400/10 blur-3xl" />
+    <div className="relative min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-white">
+
+      {/* Background decoration */}
+      <div className="pointer-events-none fixed inset-0 -z-0 overflow-hidden">
+        <div className="absolute -right-40 -top-40 h-[450px] w-[450px] rounded-full bg-accent-400/15 blur-[120px]" />
+        <div className="absolute -bottom-40 -left-40 h-[450px] w-[450px] rounded-full bg-purple-400/10 blur-[120px]" />
       </div>
 
-      <div className="mx-auto max-w-2xl px-4 pb-36 pt-6">
-        <header className="mb-5 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-slate-500 dark:text-slate-400">{greeting()} 👋</p>
-            <h1 className="bg-linear-to-r from-indigo-600 to-fuchsia-500 bg-clip-text text-3xl font-extrabold text-transparent">
-              Todo & Notes
-            </h1>
-            <p className="text-xs text-slate-400">{today}</p>
+      <div className="relative z-10 flex min-h-screen">
+
+        {/* Desktop sidebar */}
+        <aside className="hidden w-64 shrink-0 border-r border-slate-200/70 bg-white/75 px-5 py-7 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 lg:flex lg:flex-col">
+
+          <div className="mb-10 flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-accent-600 to-purple-500 text-white shadow-lg shadow-accent-500/25">
+              <CheckCircle2 size={25} />
+            </div>
+
+            <div>
+              <h1 className="text-lg font-extrabold tracking-tight">
+                TaskFlow
+              </h1>
+              <p className="text-xs text-slate-400">Plan your day better</p>
+            </div>
           </div>
 
-          <div className="relative flex gap-2">
-            <button onClick={toggleTheme} aria-label="Toggle theme" className={iconBtn}>
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <button onClick={() => setMenu(!menu)} aria-label="Menu" className={iconBtn}>
-              <Settings size={20} />
-            </button>
+          <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            Workspace
+          </p>
 
-            {menu && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-                <div className="animate-pop absolute right-0 top-14 z-30 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-800 dark:bg-slate-900">
-                  {canInstall && (
-                    <button
-                      onClick={() => { install(); setMenu(false) }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <Smartphone size={18} /> Install app
-                    </button>
-                  )}
-                  <button
-                    onClick={exportData}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <Download size={18} /> Export backup
-                  </button>
-                  <button
-                    onClick={() => fileRef.current.click()}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <Upload size={18} /> Import backup
-                  </button>
+          <nav className="space-y-2">
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => openTab(id)}
+                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-sm font-semibold transition-all ${
+                  tab === id
+                    ? 'bg-gradient-to-r from-accent-600 to-purple-500 text-white shadow-lg shadow-accent-500/20'
+                    : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Icon size={19} />
+                {label}
+
+                {id === 'tasks' && pending > 0 && (
+                  <span className={`ml-auto rounded-full px-2 py-0.5 text-xs ${
+                    tab === id
+                      ? 'bg-white/20 text-white'
+                      : 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400'
+                  }`}>
+                    {pending}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-auto rounded-3xl bg-gradient-to-br from-accent-600 to-purple-600 p-5 text-white shadow-xl">
+            <Sparkles size={25} className="mb-3" />
+            <h3 className="font-bold">Stay productive!</h3>
+            <p className="mt-1 text-xs leading-5 text-white/80">
+              Small steps every day lead to big results.
+            </p>
+            <div className="mt-4 rounded-xl bg-white/15 px-3 py-2 text-xs">
+              {completed} tasks completed
+            </div>
+          </div>
+        </aside>
+
+        {/* Main content */}
+        <div className="min-w-0 flex-1">
+
+          {/* Top header */}
+          <header className="sticky top-0 z-20 border-b border-slate-200/60 bg-white/75 px-4 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/75 sm:px-7 lg:px-10">
+
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setMobileMenu(!mobileMenu)}
+                  className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-white lg:hidden"
+                  aria-label="Open navigation"
+                >
+                  {mobileMenu ? <X size={20} /> : <Menu size={20} />}
+                </button>
+
+                <div>
+                  <p className="text-xs text-slate-400">{today}</p>
+                  <h2 className="text-lg font-extrabold sm:text-xl">
+                    {tab === 'home'
+                      ? `Welcome${name ? `, ${name}` : ' back'}! 👋`
+                      : currentTab?.label || 'TaskFlow'}
+                  </h2>
                 </div>
-              </>
-            )}
-            <input ref={fileRef} type="file" accept="application/json" onChange={importData} className="hidden" />
-          </div>
-        </header>
+              </div>
 
-        <main>
-          {tab === 'tasks' ? (
-            <Tasks tasks={tasks} setTasks={setTasks} notify={notify} />
-          ) : (
-            <Notes notes={notes} setNotes={setNotes} notify={notify} />
-          )}
-        </main>
+              <div className="flex items-center gap-2">
+                <div className="hidden rounded-full bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 sm:block">
+                  <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                  {pending} pending
+                </div>
+
+                <button
+                  onClick={toggleTheme}
+                  aria-label="Toggle theme"
+                  className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:scale-105 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
+                  {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+                </button>
+
+                <button
+                  onClick={() => setShowSettings(true)}
+                  aria-label="Settings"
+                  className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:scale-105 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
+                  <Cog size={19} />
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile menu */}
+            {mobileMenu && (
+              <nav className="mx-auto mt-4 max-w-7xl space-y-2 lg:hidden">
+                {TABS.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    onClick={() => openTab(id)}
+                    className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${
+                      tab === id
+                        ? 'bg-accent-600 text-white'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </header>
+
+          {/* Pages */}
+          <main className="mx-auto max-w-7xl px-4 py-7 pb-28 sm:px-7 sm:py-9 lg:px-10 lg:pb-10">
+
+            {tab === 'home' && (
+              <div className="animate-fade-up">
+                <Dashboard
+                  tasks={tasks}
+                  notes={notes}
+                  activity={activity}
+                  focus={focus}
+                  goal={goal}
+                  name={name}
+                  toggle={toggle}
+                  goTab={setTab}
+                />
+              </div>
+            )}
+
+            {tab === 'tasks' && (
+              <div className="animate-fade-up">
+                <Tasks
+                  tasks={tasks}
+                  setTasks={setTasks}
+                  toggle={toggle}
+                  notify={notify}
+                />
+              </div>
+            )}
+
+            {tab === 'calendar' && (
+              <div className="animate-fade-up">
+                <Calendar
+                  tasks={tasks}
+                  toggle={toggle}
+                />
+              </div>
+            )}
+
+            {tab === 'notes' && (
+              <div className="animate-fade-up">
+                <Notes
+                  notes={notes}
+                  setNotes={setNotes}
+                  notify={notify}
+                />
+              </div>
+            )}
+
+            {tab === 'focus' && (
+              <div className="animate-fade-up">
+                <Focus
+                  tasks={tasks}
+                  focus={focus}
+                  setFocus={setFocus}
+                  notify={notify}
+                />
+              </div>
+            )}
+
+          </main>
+        </div>
       </div>
 
-      {/* toast */}
+      {/* Backup input */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json"
+        onChange={importData}
+        className="hidden"
+      />
+
+      {/* Settings modal */}
+      {showSettings && (
+        <Settings
+          theme={theme}
+          toggleTheme={toggleTheme}
+          accent={accent}
+          setAccent={setAccent}
+          name={name}
+          setName={setName}
+          goal={goal}
+          setGoal={setGoal}
+          canInstall={canInstall}
+          install={install}
+          onExport={exportData}
+          onImport={() => fileRef.current?.click()}
+          onReset={resetAll}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Toast notification */}
       {toast && (
-        <div className="animate-pop fixed inset-x-0 bottom-28 z-40 flex justify-center px-4">
-          <div className="flex items-center gap-4 rounded-full bg-slate-900 py-2.5 pl-5 pr-3 text-sm text-white shadow-xl dark:bg-white dark:text-slate-900">
+        <div className="animate-pop fixed inset-x-0 bottom-24 z-50 flex justify-center px-4 lg:bottom-8">
+          <div className="flex items-center gap-4 rounded-2xl border border-slate-700 bg-slate-900 px-5 py-3 text-sm text-white shadow-2xl">
             <span>{toast.msg}</span>
+
             {toast.undo && (
               <button
-                onClick={() => { toast.undo(); setToast(null) }}
-                className="rounded-full bg-white/15 px-3 py-1 font-semibold dark:bg-slate-900/10"
+                onClick={() => {
+                  toast.undo()
+                  setToast(null)
+                }}
+                className="rounded-lg bg-white/15 px-3 py-1.5 font-bold hover:bg-white/25"
               >
                 Undo
               </button>
@@ -149,31 +426,32 @@ export default function App() {
         </div>
       )}
 
-      {/* bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
-        <div className="flex gap-1 rounded-full border border-slate-200 bg-white/80 p-1.5 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80">
-          {[
-            { id: 'tasks', label: 'Tasks', icon: ListTodo, badge: pending },
-            { id: 'notes', label: 'Notes', icon: StickyNote, badge: 0 },
-          ].map(({ id, label, icon: Icon, badge }) => (
+      {/* Mobile bottom navigation */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 lg:hidden">
+        <div className="mx-auto flex max-w-lg justify-around">
+          {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
-              className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition ${
+              onClick={() => openTab(id)}
+              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-semibold transition ${
                 tab === id
-                  ? 'bg-linear-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-500/30'
-                  : 'text-slate-500 dark:text-slate-400'
+                  ? 'text-accent-600 dark:text-accent-400'
+                  : 'text-slate-400'
               }`}
             >
-              <Icon size={19} />
-              {label}
-              {badge > 0 && (
-                <span className="rounded-full bg-white/25 px-2 text-xs">{badge}</span>
-              )}
+              <div className={`rounded-xl p-2 ${
+                tab === id
+                  ? 'bg-accent-100 dark:bg-accent-500/15'
+                  : ''
+              }`}>
+                <Icon size={20} />
+              </div>
+              {label.replace('My ', '')}
             </button>
           ))}
         </div>
       </nav>
+
     </div>
   )
 }
